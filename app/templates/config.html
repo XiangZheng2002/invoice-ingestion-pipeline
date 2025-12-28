@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}配置 - 邮件发票识别系统{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2 class="mb-4">
+            <i class="fas fa-cog"></i> 系统配置
+        </h2>
+    </div>
+</div>
+
+<div class="row">
+    <!-- QQ邮箱配置 -->
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0"><i class="fas fa-envelope"></i> QQ邮箱配置</h5>
+            </div>
+            <div class="card-body">
+                <form id="emailConfigForm">
+                    <div class="mb-3">
+                        <label for="email" class="form-label">邮箱地址</label>
+                        <input type="email" class="form-control" id="email" placeholder="your-email@qq.com" required>
+                        <div class="form-text">请输入您的QQ邮箱地址</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="password" class="form-label">授权码</label>
+                        <input type="password" class="form-control" id="password" placeholder="QQ邮箱IMAP授权码" required>
+                        <div class="form-text">
+                            不是QQ密码！请在QQ邮箱设置中生成授权码
+                            <a href="https://service.mail.qq.com/cgi-bin/help?subtype=1&&id=28&&no=1001256" target="_blank">
+                                如何获取？
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="since_date" class="form-label">起始日期</label>
+                        <input type="date" class="form-control" id="since_date" required>
+                        <div class="form-text">从哪个日期开始获取邮件</div>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-info" id="testConnectionBtn">
+                            <i class="fas fa-plug"></i> 测试连接
+                        </button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> 保存配置
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 百度OCR配置 -->
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="fas fa-brain"></i> 百度OCR配置</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>提示：</strong> 百度OCR需要在.env文件中配置
+                    <hr>
+                    <p class="mb-0 small">
+                        1. 访问 <a href="https://cloud.baidu.com/product/ocr" target="_blank">百度智能云OCR</a><br>
+                        2. 创建应用获取 APP_ID、API_KEY、SECRET_KEY<br>
+                        3. 在.env文件中设置这些配置项<br>
+                        4. 重启应用生效
+                    </p>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">配置示例</label>
+                    <pre class="bg-dark text-light p-3 rounded"><code>BAIDU_APP_ID=your-app-id
+BAIDU_API_KEY=your-api-key
+BAIDU_SECRET_KEY=your-secret-key</code></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- 使用说明 -->
+        <div class="card">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0"><i class="fas fa-question-circle"></i> 使用说明</h5>
+            </div>
+            <div class="card-body">
+                <ol class="mb-0">
+                    <li>配置QQ邮箱和授权码</li>
+                    <li>设置起始日期</li>
+                    <li>测试连接确保配置正确</li>
+                    <li>保存配置</li>
+                    <li>前往"邮件列表"页面获取邮件</li>
+                    <li>系统自动识别发票并提取信息</li>
+                    <li>在"发票列表"查看和导出数据</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // 设置默认日期为30天前
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
+    $('#since_date').val(dateStr);
+
+    // 测试连接
+    $('#testConnectionBtn').click(function() {
+        const email = $('#email').val();
+        const password = $('#password').val();
+
+        if (!email || !password) {
+            Swal.fire('错误', '请填写邮箱地址和授权码', 'error');
+            return;
+        }
+
+        Swal.fire({
+            title: '测试中...',
+            html: '正在连接QQ邮箱，请稍候',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+
+        $.ajax({
+            url: '/email/test_connection',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ email, password }),
+            success: function(response) {
+                if (response.success) {
+                    Swal.fire('成功', response.message, 'success');
+                } else {
+                    Swal.fire('失败', response.message, 'error');
+                }
+            },
+            error: function() {
+                Swal.fire('错误', '请求失败', 'error');
+            }
+        });
+    });
+
+    // 保存配置
+    $('#emailConfigForm').submit(function(e) {
+        e.preventDefault();
+
+        const email = $('#email').val();
+        const password = $('#password').val();
+        const since_date = $('#since_date').val();
+
+        Swal.fire({
+            title: '保存中...',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+
+        $.ajax({
+            url: '/email/save_config',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ email, password, since_date }),
+            success: function(response) {
+                if (response.success) {
+                    Swal.fire('成功', response.message, 'success').then(() => {
+                        window.location.href = '/email/list';
+                    });
+                } else {
+                    Swal.fire('失败', response.message, 'error');
+                }
+            },
+            error: function() {
+                Swal.fire('错误', '保存失败', 'error');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}
