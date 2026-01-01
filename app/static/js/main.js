@@ -6,6 +6,16 @@ function getCSRFToken() {
     return token ? token.getAttribute('content') : '';
 }
 
+// 为所有AJAX请求自动添加CSRF Token
+$.ajaxSetup({
+    beforeSend: function(xhr, settings) {
+        // 只为POST, PUT, DELETE请求添加CSRF token
+        if (!/^(GET|HEAD|OPTIONS|TRACE)$/i.test(settings.type) && !this.crossDomain) {
+            xhr.setRequestHeader("X-CSRFToken", getCSRFToken());
+        }
+    }
+});
+
 // 通用AJAX错误处理
 $(document).ajaxError(function(event, jqxhr, settings, thrownError) {
     console.error('AJAX Error:', thrownError);

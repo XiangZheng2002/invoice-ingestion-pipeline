@@ -37,10 +37,26 @@
                         </div>
                     </div>
 
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>权限设置说明：</strong><br>
+                        这里设置的是<strong>最大日期范围权限</strong>，实际获取邮件时在"邮件列表"页面选择具体日期（必须在此权限范围内）
+                    </div>
+
                     <div class="mb-3">
-                        <label for="since_date" class="form-label">起始日期</label>
+                        <label for="since_date" class="form-label">
+                            <i class="fas fa-lock"></i> 起始日期（权限）
+                        </label>
                         <input type="date" class="form-control" id="since_date" required>
-                        <div class="form-text">从哪个日期开始获取邮件</div>
+                        <div class="form-text">允许获取邮件的最早日期</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="before_date" class="form-label">
+                            <i class="fas fa-lock"></i> 终止日期（权限，可选）
+                        </label>
+                        <input type="date" class="form-control" id="before_date">
+                        <div class="form-text">允许获取邮件的最晚日期（留空=不限制）</div>
                     </div>
 
                     <div class="d-grid gap-2">
@@ -91,13 +107,13 @@ BAIDU_SECRET_KEY=your-secret-key</code></pre>
             </div>
             <div class="card-body">
                 <ol class="mb-0">
-                    <li>配置QQ邮箱和授权码</li>
-                    <li>设置起始日期</li>
-                    <li>测试连接确保配置正确</li>
+                    <li><strong>配置QQ邮箱和授权码</strong></li>
+                    <li><strong>设置日期权限范围</strong>（如：2024-01-01 到 2024-12-31）</li>
+                    <li>测试连接，确保配置正确</li>
                     <li>保存配置</li>
-                    <li>前往"邮件列表"页面获取邮件</li>
-                    <li>系统自动识别发票并提取信息</li>
-                    <li>在"发票列表"查看和导出数据</li>
+                    <li>前往"邮件列表"页面，<strong>选择具体日期范围获取邮件</strong>（必须在权限范围内）</li>
+                    <li>点击"识别发票"自动提取发票信息</li>
+                    <li>在"发票列表"查看和导出CSV数据</li>
                 </ol>
             </div>
         </div>
@@ -108,11 +124,41 @@ BAIDU_SECRET_KEY=your-secret-key</code></pre>
 {% block extra_js %}
 <script>
 $(document).ready(function() {
-    // 设置默认日期为30天前
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
-    $('#since_date').val(dateStr);
+    // 加载已保存的配置
+    $.ajax({
+        url: '/email/get_config',
+        method: 'GET',
+        success: function(response) {
+            if (response.success && response.data) {
+                // 填充表单
+                if (response.data.email) {
+                    $('#email').val(response.data.email);
+                }
+                if (response.data.password) {
+                    $('#password').val(response.data.password);
+                }
+                if (response.data.since_date) {
+                    $('#since_date').val(response.data.since_date);
+                } else {
+                    // 如果没有保存的配置，设置默认日期为30天前
+                    const thirtyDaysAgo = new Date();
+                    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                    const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
+                    $('#since_date').val(dateStr);
+                }
+                if (response.data.before_date) {
+                    $('#before_date').val(response.data.before_date);
+                }
+            }
+        },
+        error: function() {
+            // 如果获取失败，设置默认日期
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            const dateStr = thirtyDaysAgo.toISOString().split('T')[0];
+            $('#since_date').val(dateStr);
+        }
+    });
 
     // 测试连接
     $('#testConnectionBtn').click(function() {
@@ -158,6 +204,7 @@ $(document).ready(function() {
         const email = $('#email').val();
         const password = $('#password').val();
         const since_date = $('#since_date').val();
+        const before_date = $('#before_date').val();
 
         Swal.fire({
             title: '保存中...',
@@ -171,7 +218,7 @@ $(document).ready(function() {
             url: '/email/save_config',
             method: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ email, password, since_date }),
+            data: JSON.stringify({ email, password, since_date, before_date }),
             success: function(response) {
                 if (response.success) {
                     Swal.fire('成功', response.message, 'success').then(() => {

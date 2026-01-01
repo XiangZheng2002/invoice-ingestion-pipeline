@@ -63,7 +63,14 @@ class InvoiceDetector:
         # 检查发件人
         sender = email_data.get('sender', '').lower()
         if self._check_sender(sender):
-            return True
+            # 如果发件人是已知的发票来源，进一步检查附件
+            attachments = email_data.get('attachments', [])
+            if attachments:
+                # 只要有附件就认为可能是发票
+                for att in attachments:
+                    filename = att.get('filename', '').lower()
+                    if filename.endswith(('.pdf', '.jpg', '.jpeg', '.png', '.bmp')):
+                        return True
 
         # 检查正文
         body = email_data.get('body', '').lower()
@@ -73,9 +80,9 @@ class InvoiceDetector:
             if '发票' in body or 'invoice' in body:
                 return True
 
-        # 检查附件
+        # 检查附件（宽松模式：只要有PDF或图片附件就可能是发票）
         attachments = email_data.get('attachments', [])
-        if self._check_attachments(attachments):
+        if self._check_attachments_relaxed(attachments):
             return True
 
         return False
@@ -136,10 +143,14 @@ class InvoiceDetector:
             is_valid_format = filename.endswith(('.pdf', '.jpg', '.jpeg', '.png', '.bmp'))
             is_invoice_name = self._contains_keywords(filename, self.INVOICE_FILENAME_KEYWORDS)
 
+            # 优先级1：文件名包含发票关键词且格式正确
             if is_valid_format and is_invoice_name:
                 invoice_attachments.append(att)
-            elif is_valid_format and len(attachments) == 1:
-                # 如果邮件只有一个附件且是有效格式，可能是发票
+            # 优先级2：PDF文件（很可能是发票）
+            elif filename.endswith('.pdf'):
+                invoice_attachments.append(att)
+            # 优先级3：只有1-2个附件且是图片格式
+            elif is_valid_format and len(attachments) <= 2:
                 invoice_attachments.append(att)
 
         return invoice_attachments
@@ -161,7 +172,7 @@ class InvoiceDetector:
         return any(domain in sender for domain in self.INVOICE_SENDER_DOMAINS)
 
     def _check_attachments(self, attachments):
-        """检查附件是否包含发票文件"""
+        """检查附件是否包含发票文件（严格模式：文件名必须包含关键词）"""
         if not attachments:
             return False
 
@@ -172,6 +183,33 @@ class InvoiceDetector:
             if self._contains_keywords(filename, self.INVOICE_FILENAME_KEYWORDS):
                 # 检查文件格式
                 if filename.endswith(('.pdf', '.jpg', '.jpeg', '.png', '.bmp')):
+                    return True
+
+        return False
+
+    def _check_attachments_relaxed(self, attachments):
+        """检查附件是否包含发票文件（宽松模式：只要有PDF或图片即可）"""
+        if not attachments:
+            return False
+
+        for att in attachments:
+            filename = att.get('filename', '').lower()
+
+            # 先检查是否有明确的发票关键词
+            if self._contains_keywords(filename, self.INVOICE_FILENAME_KEYWORDS):
+                if filename.endswith(('.pdf', '.jpg', '.jpeg', '.png', '.bmp')):
+                    return True
+
+            # 宽松模式：如果有PDF或常见图片格式，也认为可能是发票
+            # 但排除一些明显不是发票的文件名
+            exclude_keywords = ['logo', 'banner', 'signature', '签名', '头像', 'avatar']
+            is_excluded = any(kw in filename for kw in exclude_keywords)
+
+            if not is_excluded:
+                if filename.endswith('.pdf'):
+                    return True
+                # 对于图片，如果只有1个附件，也认为可能是发票
+                elif filename.endswith(('.jpg', '.jpeg', '.png', '.bmp')) and len(attachments) <= 2:
                     return True
 
         return False

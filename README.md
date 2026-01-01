@@ -26,7 +26,8 @@
 ### 1. 克隆项目
 
 ```bash
-cd /Users/zhengxiang/Documents/ZLiang/bill
+git clone https://github.com/XiangZheng2002/invoice-ingestion-pipeline.git
+cd invoice-ingestion-pipeline
 ```
 
 ### 2. 创建虚拟环境
@@ -199,7 +200,7 @@ MIT License
 
 ## 作者
 
-Created with Claude Code
+Xiang Zheng, Li Zheng
 
 ## 更新日志
 
