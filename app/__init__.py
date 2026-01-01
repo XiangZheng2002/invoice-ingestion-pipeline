@@ -34,9 +34,10 @@ def create_app():
     models.init_db(app.config['DATABASE_PATH'])
 
     # 注册路由
-    from app.routes import main, email_routes, invoice
+    from app.routes import main, email_routes, invoice, config
     app.register_blueprint(main.bp)
     app.register_blueprint(email_routes.bp)
     app.register_blueprint(invoice.bp)
+    app.register_blueprint(config.bp)
 
     return app

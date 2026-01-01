@@ -13,16 +13,36 @@ load_dotenv()
 class OCRService:
     """百度OCR服务类"""
 
-    def __init__(self):
-        # 从环境变量读取配置
-        self.app_id = os.getenv('BAIDU_APP_ID')
-        self.api_key = os.getenv('BAIDU_API_KEY')
-        self.secret_key = os.getenv('BAIDU_SECRET_KEY')
+    def __init__(self, db_path=None):
+        # 优先从数据库读取配置
+        if db_path:
+            from app.models import Config as ConfigModel
+            self.app_id = ConfigModel.get(db_path, 'baidu_app_id')
+            self.api_key = ConfigModel.get(db_path, 'baidu_api_key')
+            self.secret_key = ConfigModel.get(db_path, 'baidu_secret_key')
+        else:
+            # 从环境变量读取配置（向后兼容）
+            self.app_id = None
+            self.api_key = None
+            self.secret_key = None
+
+        # 如果数据库没有配置，尝试从环境变量读取
+        if not self.app_id:
+            self.app_id = os.getenv('BAIDU_APP_ID')
+        if not self.api_key:
+            self.api_key = os.getenv('BAIDU_API_KEY')
+        if not self.secret_key:
+            self.secret_key = os.getenv('BAIDU_SECRET_KEY')
 
         # 初始化客户端
         if all([self.app_id, self.api_key, self.secret_key]):
-            self.client = AipOcr(self.app_id, self.api_key, self.secret_key)
-            self.enabled = True
+            try:
+                self.client = AipOcr(self.app_id, self.api_key, self.secret_key)
+                self.enabled = True
+            except Exception as e:
+                self.client = None
+                self.enabled = False
+                print(f"警告：百度OCR初始化失败: {e}")
         else:
             self.client = None
             self.enabled = False

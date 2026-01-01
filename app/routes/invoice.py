@@ -39,26 +39,43 @@ def api_list():
 
 @bp.route('/export')
 def export_csv():
-    """导出CSV"""
+    """导出CSV - 每次点击时临时生成并下载"""
     try:
         db_path = current_app.config['DATABASE_PATH']
         exports_path = current_app.config['EXPORTS_PATH']
 
-        # 导出CSV
+        # 临时生成CSV
         exporter = CSVExporter(db_path, exports_path)
         csv_file = exporter.export_all_invoices()
 
         if os.path.exists(csv_file):
-            return send_file(
+            # 发送文件给用户
+            response = send_file(
                 csv_file,
                 as_attachment=True,
                 download_name=os.path.basename(csv_file),
                 mimetype='text/csv'
             )
+
+            # 下载完成后删除临时文件（可选）
+            # 如果你想保留文件，可以注释掉下面的代码
+            @response.call_on_close
+            def cleanup():
+                try:
+                    # 删除刚生成的文件
+                    if os.path.exists(csv_file):
+                        os.remove(csv_file)
+                        print(f"已删除临时CSV文件: {csv_file}")
+                except Exception as e:
+                    print(f"删除临时文件失败: {e}")
+
+            return response
         else:
             return jsonify({'success': False, 'message': 'CSV文件生成失败'})
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'message': f'导出失败: {str(e)}'})
 
 @bp.route('/detail/<int:invoice_id>')

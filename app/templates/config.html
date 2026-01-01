@@ -81,22 +81,49 @@
             <div class="card-body">
                 <div class="alert alert-info">
                     <i class="fas fa-info-circle"></i>
-                    <strong>提示：</strong> 百度OCR需要在.env文件中配置
+                    <strong>如何获取百度OCR密钥？</strong>
                     <hr>
                     <p class="mb-0 small">
-                        1. 访问 <a href="https://cloud.baidu.com/product/ocr" target="_blank">百度智能云OCR</a><br>
-                        2. 创建应用获取 APP_ID、API_KEY、SECRET_KEY<br>
-                        3. 在.env文件中设置这些配置项<br>
-                        4. 重启应用生效
+                        1. 访问 <a href="https://console.bce.baidu.com/ai/#/ai/ocr/overview/index" target="_blank">百度智能云OCR控制台</a><br>
+                        2. 登录并创建应用<br>
+                        3. 在应用列表中获取 APP_ID、API_KEY、SECRET_KEY<br>
+                        4. 填写到下方表单中
                     </p>
                 </div>
 
-                <div class="mb-3">
-                    <label class="form-label">配置示例</label>
-                    <pre class="bg-dark text-light p-3 rounded"><code>BAIDU_APP_ID=your-app-id
-BAIDU_API_KEY=your-api-key
-BAIDU_SECRET_KEY=your-secret-key</code></pre>
-                </div>
+                <form id="ocrConfigForm">
+                    <div class="mb-3">
+                        <label for="baidu_app_id" class="form-label">APP ID</label>
+                        <input type="text" class="form-control" id="baidu_app_id" placeholder="百度OCR应用ID">
+                        <div class="form-text">在百度控制台的应用详情中查看</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="baidu_api_key" class="form-label">API Key</label>
+                        <input type="text" class="form-control" id="baidu_api_key" placeholder="百度OCR API Key">
+                        <div class="form-text">在百度控制台的应用详情中查看</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="baidu_secret_key" class="form-label">Secret Key</label>
+                        <input type="password" class="form-control" id="baidu_secret_key" placeholder="百度OCR Secret Key">
+                        <div class="form-text">在百度控制台的应用详情中查看</div>
+                    </div>
+
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>注意：</strong> 密钥将加密存储在数据库中，请妥善保管您的百度账号信息
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-info" id="testOCRBtn">
+                            <i class="fas fa-vial"></i> 测试OCR配置
+                        </button>
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-save"></i> 保存OCR配置
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
 
@@ -124,7 +151,7 @@ BAIDU_SECRET_KEY=your-secret-key</code></pre>
 {% block extra_js %}
 <script>
 $(document).ready(function() {
-    // 加载已保存的配置
+    // 加载已保存的邮箱配置
     $.ajax({
         url: '/email/get_config',
         method: 'GET',
@@ -160,7 +187,26 @@ $(document).ready(function() {
         }
     });
 
-    // 测试连接
+    // 加载已保存的OCR配置
+    $.ajax({
+        url: '/config/get_ocr_config',
+        method: 'GET',
+        success: function(response) {
+            if (response.success && response.data) {
+                if (response.data.app_id) {
+                    $('#baidu_app_id').val(response.data.app_id);
+                }
+                if (response.data.api_key) {
+                    $('#baidu_api_key').val(response.data.api_key);
+                }
+                if (response.data.secret_key) {
+                    $('#baidu_secret_key').val(response.data.secret_key);
+                }
+            }
+        }
+    });
+
+    // 测试邮箱连接
     $('#testConnectionBtn').click(function() {
         const email = $('#email').val();
         const password = $('#password').val();
@@ -197,7 +243,45 @@ $(document).ready(function() {
         });
     });
 
-    // 保存配置
+    // 测试OCR配置
+    $('#testOCRBtn').click(function() {
+        const app_id = $('#baidu_app_id').val();
+        const api_key = $('#baidu_api_key').val();
+        const secret_key = $('#baidu_secret_key').val();
+
+        if (!app_id || !api_key || !secret_key) {
+            Swal.fire('错误', '请填写完整的百度OCR配置', 'error');
+            return;
+        }
+
+        Swal.fire({
+            title: '测试中...',
+            html: '正在测试百度OCR连接，请稍候',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+
+        $.ajax({
+            url: '/config/test_ocr',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ app_id, api_key, secret_key }),
+            success: function(response) {
+                if (response.success) {
+                    Swal.fire('成功', '百度OCR配置正确！', 'success');
+                } else {
+                    Swal.fire('失败', response.message, 'error');
+                }
+            },
+            error: function() {
+                Swal.fire('错误', '请求失败', 'error');
+            }
+        });
+    });
+
+    // 保存邮箱配置
     $('#emailConfigForm').submit(function(e) {
         e.preventDefault();
 
@@ -221,9 +305,46 @@ $(document).ready(function() {
             data: JSON.stringify({ email, password, since_date, before_date }),
             success: function(response) {
                 if (response.success) {
-                    Swal.fire('成功', response.message, 'success').then(() => {
-                        window.location.href = '/email/list';
-                    });
+                    Swal.fire('成功', '邮箱配置保存成功！', 'success');
+                } else {
+                    Swal.fire('失败', response.message, 'error');
+                }
+            },
+            error: function() {
+                Swal.fire('错误', '保存失败', 'error');
+            }
+        });
+    });
+
+    // 保存OCR配置
+    $('#ocrConfigForm').submit(function(e) {
+        e.preventDefault();
+
+        const app_id = $('#baidu_app_id').val();
+        const api_key = $('#baidu_api_key').val();
+        const secret_key = $('#baidu_secret_key').val();
+
+        if (!app_id || !api_key || !secret_key) {
+            Swal.fire('错误', '请填写完整的百度OCR配置', 'error');
+            return;
+        }
+
+        Swal.fire({
+            title: '保存中...',
+            allowOutsideClick: false,
+            didOpen: () => {
+                Swal.showLoading();
+            }
+        });
+
+        $.ajax({
+            url: '/config/save_ocr',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ app_id, api_key, secret_key }),
+            success: function(response) {
+                if (response.success) {
+                    Swal.fire('成功', 'OCR配置保存成功！现在可以识别发票了', 'success');
                 } else {
                     Swal.fire('失败', response.message, 'error');
                 }

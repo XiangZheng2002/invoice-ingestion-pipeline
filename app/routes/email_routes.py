@@ -4,7 +4,6 @@ from app.services.email_service import EmailService
 from app.services.invoice_detector import InvoiceDetector
 from app.services.ocr_service import OCRService
 from app.services.file_handler import FileHandler
-from app.services.csv_exporter import CSVExporter
 from app.utils.crypto import CryptoUtil
 import traceback
 import os
@@ -202,7 +201,7 @@ def process_invoices():
 
         # 初始化服务
         detector = InvoiceDetector()
-        ocr_service = OCRService()
+        ocr_service = OCRService(db_path)  # 传递db_path以从数据库读取配置
         file_handler = FileHandler()
         email_service = EmailService()
 
@@ -349,31 +348,16 @@ def process_invoices():
         print(f"  识别到发票: {invoice_count} 张")
         print(f"  处理失败: {error_count} 封")
 
-        # 自动导出CSV（如果识别到发票）
-        csv_file = None
-        if invoice_count > 0:
-            try:
-                exports_path = current_app.config['EXPORTS_PATH']
-                exporter = CSVExporter(db_path, exports_path)
-                csv_file = exporter.export_all_invoices()
-                print(f"\n✓ 发票数据已自动导出到: {csv_file}")
-            except Exception as e:
-                print(f"\n✗ CSV导出失败: {e}")
-                traceback.print_exc()
-
         message = f'处理完成！识别到 {invoice_count} 张发票'
         if error_count > 0:
             message += f'，{error_count} 封邮件处理失败'
-        if csv_file:
-            message += f'。已自动导出到 {os.path.basename(csv_file)}'
 
         return jsonify({
             'success': True,
             'message': message,
             'processed': processed_count,
             'invoices': invoice_count,
-            'errors': error_count,
-            'csv_file': os.path.basename(csv_file) if csv_file else None
+            'errors': error_count
         })
 
     except Exception as e:
