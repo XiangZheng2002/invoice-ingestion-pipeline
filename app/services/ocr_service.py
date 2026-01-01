@@ -107,7 +107,14 @@ class OCRService:
         def get_value(field_name):
             """安全获取字段值"""
             if field_name in words_result:
-                return words_result[field_name].get('words', '')
+                value = words_result[field_name]
+                # Handle both dict format {'words': 'value'} and string format 'value'
+                if isinstance(value, dict):
+                    return value.get('words', '')
+                elif isinstance(value, str):
+                    return value
+                else:
+                    return str(value) if value else ''
             return ''
 
         invoice_data = {

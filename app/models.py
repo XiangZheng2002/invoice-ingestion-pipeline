@@ -141,6 +141,31 @@ class Email:
         conn.close()
         return count
 
+    @staticmethod
+    def update_status(db_path, email_id, is_invoice=None, processed=None):
+        """更新邮件状态"""
+        conn = get_db_connection(db_path)
+        cursor = conn.cursor()
+
+        updates = []
+        params = []
+
+        if is_invoice is not None:
+            updates.append('is_invoice = ?')
+            params.append(is_invoice)
+
+        if processed is not None:
+            updates.append('processed = ?')
+            params.append(processed)
+
+        if updates:
+            params.append(email_id)
+            sql = f"UPDATE emails SET {', '.join(updates)} WHERE email_id = ?"
+            cursor.execute(sql, params)
+            conn.commit()
+
+        conn.close()
+
 class Invoice:
     """发票模型"""
 

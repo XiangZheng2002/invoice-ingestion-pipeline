@@ -4,6 +4,7 @@ from app.services.email_service import EmailService
 from app.services.invoice_detector import InvoiceDetector
 from app.services.ocr_service import OCRService
 from app.services.file_handler import FileHandler
+from app.services.csv_exporter import CSVExporter
 from app.utils.crypto import CryptoUtil
 import traceback
 import os
@@ -228,61 +229,151 @@ def process_invoices():
         emails = Email.get_all(db_path, limit=100)
         processed_count = 0
         invoice_count = 0
+        error_count = 0
+
+        print(f"\n开始处理发票识别，共 {len(emails)} 封邮件")
 
         for email_row in emails:
             if email_row['processed']:
                 continue
 
+            email_id = email_row['email_id']
+            subject = email_row['subject']
+            print(f"\n处理邮件 [{email_id}]: {subject}")
+
             try:
                 # 重新获取邮件完整数据
-                email_data = email_service.parse_email(email_row['email_id'].encode())
+                email_data = email_service.parse_email(email_id.encode())
+                print(f"  ✓ 邮件数据获取成功")
 
                 # 检测是否为发票邮件
                 is_invoice = detector.is_invoice_email(email_data)
+                confidence = detector.get_detection_confidence(email_data)
+                print(f"  发票检测: {'是发票' if is_invoice else '不是发票'} (置信度: {confidence:.2f})")
 
                 if is_invoice:
+                    # 更新邮件状态为发票邮件
+                    Email.update_status(db_path, email_id, is_invoice=True)
+                    print(f"  ✓ 已标记为发票邮件")
+
                     # 提取发票附件
                     invoice_files = detector.extract_invoice_files(email_data)
+                    print(f"  发现 {len(invoice_files)} 个发票附件")
 
-                    for att in invoice_files:
+                    for idx, att in enumerate(invoice_files, 1):
+                        filename = att.get('filename', 'unknown')
+                        print(f"  处理附件 {idx}/{len(invoice_files)}: {filename}")
+
                         # 保存附件
                         att_path = email_service.download_attachment(att, attachments_path)
 
                         if att_path:
+                            print(f"    ✓ 附件已保存: {att_path}")
+
                             # 处理文件
                             success, image_path, error = file_handler.process_invoice_file(att_path)
 
                             if success:
+                                print(f"    ✓ 文件处理成功: {image_path}")
+
                                 # OCR识别
+                                print(f"    开始OCR识别...")
                                 ocr_result = ocr_service.recognize_invoice(image_path)
 
                                 if ocr_result['success']:
                                     # 保存发票数据
                                     invoice_data = ocr_result['data']
-                                    invoice_data['email_id'] = email_row['email_id']
+                                    invoice_data['email_id'] = email_id
                                     invoice_data['file_path'] = att_path
 
                                     Invoice.create(db_path, invoice_data)
                                     invoice_count += 1
+                                    print(f"    ✓ 发票识别成功！发票号: {invoice_data.get('invoice_number', 'N/A')}")
+                                else:
+                                    error_msg = ocr_result.get('message', 'Unknown error')
+                                    print(f"    ✗ OCR识别失败: {error_msg}")
+
+                                    # 创建测试发票记录（OCR失败时）
+                                    if 'IAM Certification failed' in error_msg or 'OCR未配置' in error_msg:
+                                        print(f"    ⚠ OCR未正确配置，创建测试发票记录...")
+                                        test_invoice_data = {
+                                            'email_id': email_id,
+                                            'invoice_code': '',
+                                            'invoice_number': f'TEST-{email_id}',
+                                            'invoice_type': '测试发票（OCR未配置）',
+                                            'invoice_date': '',
+                                            'buyer_name': '待识别',
+                                            'seller_name': '待识别',
+                                            'total_amount': 0.0,
+                                            'tax_amount': 0.0,
+                                            'total_with_tax': 0.0,
+                                            'file_path': att_path,
+                                            'ocr_confidence': 0.0,
+                                            'notes': f'OCR识别失败: {error_msg}。请配置百度OCR密钥后重新识别。'
+                                        }
+                                        Invoice.create(db_path, test_invoice_data)
+                                        invoice_count += 1
+                                        print(f"    ✓ 已创建测试发票记录，请配置OCR后重新识别")
 
                                 # 清理临时文件
                                 if image_path != att_path:
                                     file_handler.clean_temp_files([image_path])
+                            else:
+                                print(f"    ✗ 文件处理失败: {error}")
+                        else:
+                            print(f"    ✗ 附件保存失败")
+                else:
+                    # 不是发票邮件，也更新状态
+                    Email.update_status(db_path, email_id, is_invoice=False)
 
                 # 标记邮件为已处理
+                Email.update_status(db_path, email_id, processed=True)
                 processed_count += 1
+                print(f"  ✓ 邮件已标记为已处理")
 
             except Exception as e:
-                print(f"处理邮件失败 {email_row['id']}: {e}")
+                error_count += 1
+                print(f"  ✗ 处理邮件失败: {e}")
+                traceback.print_exc()
+                # 即使失败也标记为已处理，避免重复处理
+                try:
+                    Email.update_status(db_path, email_id, processed=True)
+                except:
+                    pass
                 continue
 
         email_service.disconnect()
 
+        print(f"\n处理完成！")
+        print(f"  已处理: {processed_count} 封")
+        print(f"  识别到发票: {invoice_count} 张")
+        print(f"  处理失败: {error_count} 封")
+
+        # 自动导出CSV（如果识别到发票）
+        csv_file = None
+        if invoice_count > 0:
+            try:
+                exports_path = current_app.config['EXPORTS_PATH']
+                exporter = CSVExporter(db_path, exports_path)
+                csv_file = exporter.export_all_invoices()
+                print(f"\n✓ 发票数据已自动导出到: {csv_file}")
+            except Exception as e:
+                print(f"\n✗ CSV导出失败: {e}")
+                traceback.print_exc()
+
+        message = f'处理完成！识别到 {invoice_count} 张发票'
+        if error_count > 0:
+            message += f'，{error_count} 封邮件处理失败'
+        if csv_file:
+            message += f'。已自动导出到 {os.path.basename(csv_file)}'
+
         return jsonify({
             'success': True,
-            'message': f'处理完成！识别到 {invoice_count} 张发票',
+            'message': message,
             'processed': processed_count,
-            'invoices': invoice_count
+            'invoices': invoice_count,
+            'errors': error_count,
+            'csv_file': os.path.basename(csv_file) if csv_file else None
         })
 
     except Exception as e:

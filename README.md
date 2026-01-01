@@ -200,7 +200,7 @@ MIT License
 
 ## 作者
 
-Xiang Zheng, Li Zheng
+Li Zheng and Xiang Zheng
 
 ## 更新日志
 
