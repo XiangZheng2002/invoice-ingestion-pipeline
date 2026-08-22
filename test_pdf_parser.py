@@ -17,6 +17,15 @@ import sys
 import tempfile
 import zipfile
 
+# Windows 的标准输出默认是控制台代码页（英文环境为 cp1252），
+# 本脚本全是中文输出，不切到 UTF-8 会直接 UnicodeEncodeError。
+for _stream in (sys.stdout, sys.stderr):
+    if _stream is not None and hasattr(_stream, 'reconfigure'):
+        try:
+            _stream.reconfigure(encoding='utf-8', errors='replace')
+        except (ValueError, OSError):
+            pass
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:

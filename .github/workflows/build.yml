@@ -3,6 +3,11 @@ name: 打包桌面应用
 # PyInstaller 不能交叉编译：Mac 上打的包 Windows 用不了，反之亦然。
 # 这里在两个系统上各构建一次，产物可直接下载分发。
 
+env:
+  # Windows runner 默认 cp1252，项目里的中文输出会 UnicodeEncodeError
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: '1'
+
 on:
   push:
     tags: ['v*']          # 打 tag 时自动构建并发布 Release

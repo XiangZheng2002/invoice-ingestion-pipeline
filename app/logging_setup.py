@@ -53,6 +53,23 @@ class _StreamToLogger:
         return False
 
 
+def _force_utf8(stream):
+    """
+    把控制台流切到 UTF-8
+
+    Windows 的标准输出默认跟随控制台代码页（英文环境是 cp1252），
+    打印中文会直接抛 UnicodeEncodeError 把程序打断 ——
+    本项目的日志和进度输出全是中文，所以必须显式切过来。
+    errors='replace' 兜底，实在编码不了也只是显示成问号，不会崩。
+    """
+    if stream is None or not hasattr(stream, 'reconfigure'):
+        return
+    try:
+        stream.reconfigure(encoding='utf-8', errors='replace')
+    except (ValueError, OSError):
+        pass    # 流已关闭或不支持，忽略
+
+
 def get_log_path():
     """
     日志文件路径，可用 LOG_FILE 环境变量覆盖
@@ -82,6 +99,10 @@ def setup_logging(level=None):
 
     if _configured:
         return log_path
+
+    # 有控制台的话先把编码切到 UTF-8，否则 Windows 上第一句中文就崩
+    _force_utf8(sys.stdout)
+    _force_utf8(sys.stderr)
 
     level_name = (level or os.getenv('LOG_LEVEL') or 'INFO').upper()
     log_level = getattr(logging, level_name, logging.INFO)
