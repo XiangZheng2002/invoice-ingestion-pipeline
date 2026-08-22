@@ -17,8 +17,9 @@ class Config:
     EXPORTS_PATH = os.getenv('EXPORTS_PATH', 'data/exports')
 
     # 邮件配置
-    IMAP_SERVER = 'imap.qq.com'
-    IMAP_PORT = 993
+    # 各服务商的 IMAP 地址见 app/services/mail_providers.py，
+    # 这里只保留通用默认端口
+    DEFAULT_IMAP_PORT = 993
 
     # 百度OCR配置
     BAIDU_APP_ID = os.getenv('BAIDU_APP_ID')

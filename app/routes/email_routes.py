@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, jsonify, current_app
 from app.models import Email, Invoice, Config as ConfigModel, get_db_connection
 from app.services.email_service import EmailService
+from app.services import mail_providers
 from app.services.invoice_detector import InvoiceDetector
 from app.services.invoice_extractor import InvoiceExtractor
 from app.utils.crypto import CryptoUtil
@@ -21,23 +22,46 @@ def email_list():
 
     return render_template('email_list.html', emails=emails, since_date=since_date, before_date=before_date)
 
+def _stored_mail_settings(db_path):
+    """读出保存的邮箱连接参数"""
+    return {
+        'email': ConfigModel.get(db_path, 'email_address') or '',
+        'password': ConfigModel.get(db_path, 'email_password') or '',
+        'provider': ConfigModel.get(db_path, 'mail_provider') or '',
+        'imap_host': ConfigModel.get(db_path, 'imap_host') or '',
+        'imap_port': ConfigModel.get(db_path, 'imap_port') or '',
+        'folder': ConfigModel.get(db_path, 'mail_folder') or 'INBOX',
+    }
+
+
+@bp.route('/providers', methods=['GET'])
+def providers():
+    """支持的邮箱服务商列表，供前端渲染下拉框和自动识别"""
+    return jsonify({
+        'success': True,
+        'providers': mail_providers.all_providers(),
+        'domains': mail_providers.domain_map(),
+    })
+
+
 @bp.route('/get_config', methods=['GET'])
 def get_config():
     """获取邮箱配置"""
     try:
         db_path = current_app.config['DATABASE_PATH']
-        email_address = ConfigModel.get(db_path, 'email_address')
-        password = ConfigModel.get(db_path, 'email_password')
-        since_date = ConfigModel.get(db_path, 'since_date')
-        before_date = ConfigModel.get(db_path, 'before_date')
+        settings = _stored_mail_settings(db_path)
 
         return jsonify({
             'success': True,
             'data': {
-                'email': email_address or '',
-                'password': password or '',
-                'since_date': since_date or '',
-                'before_date': before_date or ''
+                'email': settings['email'],
+                'password': settings['password'],
+                'provider': settings['provider'],
+                'imap_host': settings['imap_host'],
+                'imap_port': settings['imap_port'],
+                'folder': settings['folder'],
+                'since_date': ConfigModel.get(db_path, 'since_date') or '',
+                'before_date': ConfigModel.get(db_path, 'before_date') or ''
             }
         })
 
@@ -57,10 +81,27 @@ def save_config():
         if not all([email_address, password]):
             return jsonify({'success': False, 'message': '邮箱地址和密码不能为空'})
 
-        # 保存配置到数据库（密码加密）
         db_path = current_app.config['DATABASE_PATH']
         ConfigModel.set(db_path, 'email_address', email_address, encrypted=False)
         ConfigModel.set(db_path, 'email_password', password, encrypted=True)
+
+        # 连接参数只在请求里带了对应字段时才更新。
+        # 邮件列表页那个"自动放宽日期权限"的流程只会传邮箱和日期，
+        # 无条件写入会把自定义 IMAP 服务器和文件夹选择清空。
+        if 'provider' in data:
+            ConfigModel.set(db_path, 'mail_provider', data.get('provider') or '', encrypted=False)
+        elif not ConfigModel.get(db_path, 'mail_provider'):
+            detected = mail_providers.detect(email_address)
+            ConfigModel.set(db_path, 'mail_provider',
+                            detected.key if detected else '', encrypted=False)
+
+        if 'imap_host' in data:
+            ConfigModel.set(db_path, 'imap_host', (data.get('imap_host') or '').strip(), encrypted=False)
+        if 'imap_port' in data:
+            ConfigModel.set(db_path, 'imap_port', str(data.get('imap_port') or ''), encrypted=False)
+        if 'folder' in data:
+            ConfigModel.set(db_path, 'mail_folder', (data.get('folder') or 'INBOX').strip(), encrypted=False)
+
         if since_date:
             ConfigModel.set(db_path, 'since_date', since_date, encrypted=False)
         if before_date:
@@ -76,7 +117,7 @@ def save_config():
 
 @bp.route('/test_connection', methods=['POST'])
 def test_connection():
-    """测试邮箱连接"""
+    """测试邮箱连接，顺便把该账号的文件夹列表带回去"""
     try:
         data = request.get_json()
         email_address = data.get('email')
@@ -85,15 +126,26 @@ def test_connection():
         if not all([email_address, password]):
             return jsonify({'success': False, 'message': '邮箱地址和密码不能为空'})
 
-        # 测试连接
         email_service = EmailService()
-        success, message = email_service.connect(email_address, password)
+        success, message = email_service.connect(
+            email_address, password,
+            provider_key=data.get('provider'),
+            imap_host=data.get('imap_host'),
+            imap_port=data.get('imap_port'),
+        )
 
-        if success:
-            email_service.disconnect()
-            return jsonify({'success': True, 'message': '连接成功！'})
-        else:
+        if not success:
             return jsonify({'success': False, 'message': message})
+
+        try:
+            folders = email_service.list_folders()
+        except Exception as e:
+            print(f"列出文件夹失败: {e}")
+            folders = []
+        finally:
+            email_service.disconnect()
+
+        return jsonify({'success': True, 'message': message, 'folders': folders})
 
     except Exception as e:
         traceback.print_exc()
@@ -109,8 +161,9 @@ def fetch_emails():
 
         # 从数据库读取配置
         db_path = current_app.config['DATABASE_PATH']
-        email_address = ConfigModel.get(db_path, 'email_address')
-        password = ConfigModel.get(db_path, 'email_password')
+        settings = _stored_mail_settings(db_path)
+        email_address = settings['email']
+        password = settings['password']
 
         # 如果没有传递日期，从配置中读取
         if not since_date_str:
@@ -123,7 +176,12 @@ def fetch_emails():
 
         # 连接邮箱
         email_service = EmailService()
-        success, message = email_service.connect(email_address, password)
+        success, message = email_service.connect(
+            email_address, password,
+            provider_key=settings['provider'],
+            imap_host=settings['imap_host'],
+            imap_port=settings['imap_port'],
+        )
 
         if not success:
             return jsonify({'success': False, 'message': message})
@@ -149,9 +207,11 @@ def fetch_emails():
             except:
                 before_date = None
 
-        print(f"获取邮件范围: {since_date.date()} 到 {before_date.date() if before_date else '最新'}")
+        folder = settings['folder'] or 'INBOX'
+        print(f"获取邮件范围: {since_date.date()} 到 "
+              f"{before_date.date() if before_date else '最新'}（文件夹: {folder}）")
 
-        email_ids = email_service.fetch_emails(since_date, before_date)
+        email_ids = email_service.fetch_emails(since_date, before_date, folder=folder)
 
         total_emails = len(email_ids)
         print(f"找到 {total_emails} 封邮件，准备全部处理")
@@ -208,16 +268,25 @@ def process_invoices():
             print("提示：百度OCR未配置，PDF/OFD电子发票仍可直接解析，图片发票将被跳过")
 
         # 获取配置
-        email_address = ConfigModel.get(db_path, 'email_address')
-        password = ConfigModel.get(db_path, 'email_password')
+        settings = _stored_mail_settings(db_path)
+        email_address = settings['email']
+        password = settings['password']
 
         if not all([email_address, password]):
             return jsonify({'success': False, 'message': '请先配置邮箱信息'})
 
         # 连接邮箱
-        success, message = email_service.connect(email_address, password)
+        success, message = email_service.connect(
+            email_address, password,
+            provider_key=settings['provider'],
+            imap_host=settings['imap_host'],
+            imap_port=settings['imap_port'],
+        )
         if not success:
             return jsonify({'success': False, 'message': f'邮箱连接失败: {message}'})
+
+        # 后续 parse_email 要在正确的文件夹里取信，先选中
+        email_service.current_folder = settings['folder'] or 'INBOX'
 
         # 获取未处理的邮件
         emails = Email.get_all(db_path, limit=100)

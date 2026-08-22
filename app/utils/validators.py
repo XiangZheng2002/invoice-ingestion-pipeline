@@ -20,9 +20,11 @@ class Validators:
             return False
 
     @staticmethod
-    def is_qq_email(email):
-        """检查是否为QQ邮箱"""
-        return email.lower().endswith('@qq.com')
+    def get_email_domain(email):
+        """取邮箱域名，用于识别服务商"""
+        if not email or '@' not in email:
+            return ''
+        return email.rsplit('@', 1)[1].strip().lower()
 
     @staticmethod
     def sanitize_filename(filename):
