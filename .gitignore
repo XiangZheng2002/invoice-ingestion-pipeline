@@ -60,3 +60,8 @@ htmlcov/
 *.tmp
 temp/
 tmp/
+
+# .env 的备份副本同样含密钥，不能提交
+.env.backup*
+.env.local
+*.key

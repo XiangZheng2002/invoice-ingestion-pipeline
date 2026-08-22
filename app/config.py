@@ -34,7 +34,7 @@ class Config:
 
     # 文件上传配置
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
-    ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg'}
+    ALLOWED_EXTENSIONS = {'pdf', 'ofd', 'png', 'jpg', 'jpeg', 'bmp', 'webp', 'tif', 'tiff'}
 
     @staticmethod
     def allowed_file(filename):

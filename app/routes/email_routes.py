@@ -2,8 +2,7 @@ from flask import Blueprint, render_template, request, jsonify, current_app
 from app.models import Email, Invoice, Config as ConfigModel, get_db_connection
 from app.services.email_service import EmailService
 from app.services.invoice_detector import InvoiceDetector
-from app.services.ocr_service import OCRService
-from app.services.file_handler import FileHandler
+from app.services.invoice_extractor import InvoiceExtractor
 from app.utils.crypto import CryptoUtil
 import traceback
 import os
@@ -201,16 +200,12 @@ def process_invoices():
 
         # 初始化服务
         detector = InvoiceDetector()
-        ocr_service = OCRService(db_path)  # 传递db_path以从数据库读取配置
-        file_handler = FileHandler()
+        # 电子发票走文字层直接解析，只有图片/扫描件才需要OCR，所以这里不再强制要求OCR配置
+        extractor = InvoiceExtractor(db_path)
         email_service = EmailService()
 
-        # 检查OCR服务是否可用
-        if not ocr_service.is_enabled():
-            return jsonify({
-                'success': False,
-                'message': '百度OCR未配置，请在.env文件中配置BAIDU_APP_ID、BAIDU_API_KEY、BAIDU_SECRET_KEY'
-            })
+        if not extractor.ocr_available():
+            print("提示：百度OCR未配置，PDF/OFD电子发票仍可直接解析，图片发票将被跳过")
 
         # 获取配置
         email_address = ConfigModel.get(db_path, 'email_address')
@@ -269,56 +264,27 @@ def process_invoices():
                         if att_path:
                             print(f"    ✓ 附件已保存: {att_path}")
 
-                            # 处理文件
-                            success, image_path, error = file_handler.process_invoice_file(att_path)
+                            # 识别发票：PDF/OFD直接解析，图片走OCR
+                            extract_result = extractor.extract(att_path)
 
-                            if success:
-                                print(f"    ✓ 文件处理成功: {image_path}")
+                            if extract_result['success']:
+                                invoice_data = extract_result['data']
+                                source_label = InvoiceExtractor.describe_source(extract_result['source'])
 
-                                # OCR识别
-                                print(f"    开始OCR识别...")
-                                ocr_result = ocr_service.recognize_invoice(image_path)
-
-                                if ocr_result['success']:
-                                    # 保存发票数据
-                                    invoice_data = ocr_result['data']
+                                # 同一张发票可能出现在多封邮件里，按发票号码去重
+                                existing = Invoice.get_by_number(db_path, invoice_data.get('invoice_number'))
+                                if existing:
+                                    print(f"    ⊙ 发票 {invoice_data.get('invoice_number')} 已存在，跳过")
+                                else:
                                     invoice_data['email_id'] = email_id
                                     invoice_data['file_path'] = att_path
+                                    invoice_data['notes'] = f'邮件附件，识别来源：{source_label}'
 
                                     Invoice.create(db_path, invoice_data)
                                     invoice_count += 1
-                                    print(f"    ✓ 发票识别成功！发票号: {invoice_data.get('invoice_number', 'N/A')}")
-                                else:
-                                    error_msg = ocr_result.get('message', 'Unknown error')
-                                    print(f"    ✗ OCR识别失败: {error_msg}")
-
-                                    # 创建测试发票记录（OCR失败时）
-                                    if 'IAM Certification failed' in error_msg or 'OCR未配置' in error_msg:
-                                        print(f"    ⚠ OCR未正确配置，创建测试发票记录...")
-                                        test_invoice_data = {
-                                            'email_id': email_id,
-                                            'invoice_code': '',
-                                            'invoice_number': f'TEST-{email_id}',
-                                            'invoice_type': '测试发票（OCR未配置）',
-                                            'invoice_date': '',
-                                            'buyer_name': '待识别',
-                                            'seller_name': '待识别',
-                                            'total_amount': 0.0,
-                                            'tax_amount': 0.0,
-                                            'total_with_tax': 0.0,
-                                            'file_path': att_path,
-                                            'ocr_confidence': 0.0,
-                                            'notes': f'OCR识别失败: {error_msg}。请配置百度OCR密钥后重新识别。'
-                                        }
-                                        Invoice.create(db_path, test_invoice_data)
-                                        invoice_count += 1
-                                        print(f"    ✓ 已创建测试发票记录，请配置OCR后重新识别")
-
-                                # 清理临时文件
-                                if image_path != att_path:
-                                    file_handler.clean_temp_files([image_path])
+                                    print(f"    ✓ 识别成功（{source_label}）！发票号: {invoice_data.get('invoice_number', 'N/A')}")
                             else:
-                                print(f"    ✗ 文件处理失败: {error}")
+                                print(f"    ✗ 识别失败: {extract_result['message']}")
                         else:
                             print(f"    ✗ 附件保存失败")
                 else:

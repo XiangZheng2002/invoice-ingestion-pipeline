@@ -5,8 +5,15 @@
 
 import os
 from PIL import Image
-from pdf2image import convert_from_path
 import tempfile
+
+try:
+    import pymupdf
+except ImportError:  # pragma: no cover - 兼容旧版本PyMuPDF
+    try:
+        import fitz as pymupdf
+    except ImportError:
+        pymupdf = None
 
 class FileHandler:
     """文件处理类"""
@@ -14,27 +21,39 @@ class FileHandler:
     def __init__(self):
         self.temp_dir = tempfile.gettempdir()
 
-    def pdf_to_images(self, pdf_path):
+    def pdf_to_images(self, pdf_path, dpi=200):
         """
-        将PDF转换为图片
+        将PDF转换为图片（仅用于OCR兜底，电子发票应优先走文字层直接解析）
+
+        使用PyMuPDF渲染，纯Python wheel自带渲染引擎，
+        不像pdf2image那样依赖外部poppler二进制——打包分发时不会因缺依赖而失败。
 
         Args:
             pdf_path: PDF文件路径
+            dpi: 渲染分辨率
 
         Returns:
             list: 图片路径列表
         """
-        try:
-            # 转换PDF为图片（只转换第一页）
-            images = convert_from_path(pdf_path, first_page=1, last_page=1, dpi=200)
+        if pymupdf is None:
+            print("PDF转图片失败: 未安装PyMuPDF")
+            return []
 
+        try:
             image_paths = []
             base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            zoom = dpi / 72.0
 
-            for i, image in enumerate(images):
-                # 保存图片
-                image_path = os.path.join(self.temp_dir, f"{base_name}_page_{i+1}.jpg")
-                image.save(image_path, 'JPEG', quality=95)
+            with pymupdf.open(pdf_path) as doc:
+                if doc.page_count == 0:
+                    return []
+
+                # 只渲染第一页（发票信息都在首页）
+                page = doc[0]
+                pixmap = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
+
+                image_path = os.path.join(self.temp_dir, f"{base_name}_page_1.jpg")
+                pixmap.pil_save(image_path, format='JPEG', quality=95)
                 image_paths.append(image_path)
 
             return image_paths
@@ -108,7 +127,9 @@ class FileHandler:
 
         if file_ext == '.pdf':
             return True, 'pdf', None
-        elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp']:
+        elif file_ext == '.ofd':
+            return True, 'ofd', None
+        elif file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff']:
             return True, 'image', None
         else:
             return False, None, f'不支持的文件类型: {file_ext}'
@@ -192,6 +213,10 @@ class FileHandler:
             elif file_type == 'image':
                 # 转换为JPG
                 image_path = self.convert_to_jpg(file_path)
+
+            elif file_type == 'ofd':
+                # OFD无法渲染成图片，只能走文字层直接解析
+                return False, None, 'OFD文件不支持OCR，请使用直接解析'
 
             else:
                 return False, None, f'不支持的文件类型: {file_type}'

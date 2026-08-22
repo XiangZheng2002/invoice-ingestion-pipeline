@@ -6,11 +6,13 @@ Flask-WTF==1.2.1
 # 邮件处理
 # imaplib 和 email 是Python内置库，无需安装
 
-# OCR服务
+# OCR服务（仅用于图片/扫描件兜底，电子发票不需要）
 baidu-aip==4.16.13
 
 # 文件处理
-pdf2image==1.16.3
+# PyMuPDF: PDF文字层提取 + PDF渲染成图片
+# 纯Python wheel自带渲染引擎，不依赖外部poppler二进制，打包分发不会缺依赖
+pymupdf>=1.24.0
 Pillow>=10.2.0
 
 # 数据处理
@@ -19,12 +21,20 @@ Pillow>=10.2.0
 # 加密
 cryptography>=42.0.0
 
+# 桌面窗口外壳
+# 用系统自带的浏览器内核（macOS 用 WKWebView，Windows 用 Edge WebView2），
+# 所以体积很小，不需要打包整个 Chromium
+pywebview>=5.0
+
 # 环境变量
 python-dotenv==1.0.0
 
 # 工具
 requests>=2.31.0
 python-dateutil==2.8.2
+
+# 打包工具
+pyinstaller>=6.0.0
 
 # 开发工具（可选）
 # pytest==7.4.3
