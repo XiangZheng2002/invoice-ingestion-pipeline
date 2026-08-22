@@ -1,13 +1,17 @@
 {% extends "base.html" %}
 
-{% block title %}邮件列表 - 邮件发票识别系统{% endblock %}
+{% block title %}邮件 - 邮件发票识别系统{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h2 class="mb-4">
-            <i class="fas fa-envelope"></i> 邮件列表
-        </h2>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">邮件</h1>
+        <p class="page-subtitle">从 QQ 邮箱批量获取并识别发票</p>
+    </div>
+    <div class="page-actions">
+        <a href="/upload/" class="btn btn-outline-secondary">
+            <i class="fas fa-cloud-upload-alt"></i>改用上传识别
+        </a>
     </div>
 </div>
 
@@ -15,13 +19,13 @@
     <div class="col-12">
         <div class="card">
             <div class="card-header">
-                <h6 class="mb-0"><i class="fas fa-filter"></i> 获取邮件</h6>
+                <span><i class="fas fa-filter"></i>获取邮件</span>
             </div>
             <div class="card-body">
                 <!-- 显示Config权限范围 -->
                 <div class="alert alert-info mb-3" id="permissionAlert">
                     <i class="fas fa-info-circle"></i>
-                    <strong>Config权限范围：</strong>
+                    <strong>授权日期范围：</strong>
                     {% if since_date %}
                         {{ since_date }}
                         {% if before_date %}
@@ -53,15 +57,15 @@
                             <div class="form-text">到哪天结束（留空=最新）</div>
                         </div>
 
-                        <div class="col-md-6">
+                        <div class="col-md-6 d-flex gap-2 flex-wrap">
                             <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-sync"></i> 获取邮件
+                                <i class="fas fa-sync"></i>获取邮件
                             </button>
-                            <button type="button" class="btn btn-success" id="processInvoicesBtn">
-                                <i class="fas fa-magic"></i> 识别发票
+                            <button type="button" class="btn btn-outline-secondary" id="processInvoicesBtn">
+                                <i class="fas fa-magic"></i>识别发票
                             </button>
-                            <button type="button" class="btn btn-danger" id="clearEmailsBtn">
-                                <i class="fas fa-trash"></i> 清空列表
+                            <button type="button" class="btn btn-outline-danger ms-auto" id="clearEmailsBtn">
+                                <i class="fas fa-trash"></i>清空列表
                             </button>
                         </div>
                     </div>
@@ -75,12 +79,12 @@
     <div class="col-12">
         <div class="card">
             <div class="card-header">
-                <h5 class="mb-0">邮件记录</h5>
+                <span>邮件记录</span>
             </div>
-            <div class="card-body">
+            <div class="card-body {{ 'is-flush' if emails }}">
                 {% if emails %}
                 <div class="table-responsive">
-                    <table id="emailTable" class="table table-striped table-hover">
+                    <table id="emailTable" class="table table-hover">
                         <thead>
                             <tr>
                                 <th>ID</th>
@@ -97,7 +101,7 @@
                                 <td>{{ email.id }}</td>
                                 <td>{{ email.subject }}</td>
                                 <td>{{ email.sender }}</td>
-                                <td>{{ email.received_date }}</td>
+                                <td class="nowrap">{{ email.received_date }}</td>
                                 <td>
                                     {% if email.is_invoice %}
                                     <span class="badge bg-success">是</span>
@@ -118,10 +122,10 @@
                     </table>
                 </div>
                 {% else %}
-                <div class="text-center text-muted py-5">
-                    <i class="fas fa-inbox fa-4x mb-3"></i>
-                    <h5>暂无邮件记录</h5>
-                    <p>点击上方"获取新邮件"按钮开始</p>
+                <div class="empty-state">
+                    <div class="empty-icon"><i class="fas fa-inbox"></i></div>
+                    <div class="empty-title">暂无邮件记录</div>
+                    <div class="empty-desc">选好日期后点击上方"获取邮件"开始</div>
                 </div>
                 {% endif %}
             </div>
@@ -163,12 +167,7 @@ $(document).ready(function() {
 
     // 初始化DataTable
     {% if emails %}
-    $('#emailTable').DataTable({
-        language: {
-            url: '//cdn.datatables.net/plug-ins/1.13.6/i18n/zh.json'
-        },
-        order: [[0, 'desc']]
-    });
+    initDataTable('#emailTable', { order: [[0, 'desc']] });
     {% endif %}
 
     // 获取新邮件（使用表单中的日期）
@@ -211,8 +210,6 @@ $(document).ready(function() {
                 showCancelButton: true,
                 confirmButtonText: '自动更新并获取邮件',
                 cancelButtonText: '取消',
-                confirmButtonColor: '#3085d6',
-                cancelButtonColor: '#d33'
             }).then((result) => {
                 if (result.isConfirmed) {
                     // 自动更新config权限
@@ -340,7 +337,7 @@ $(document).ready(function() {
             if (result.isConfirmed) {
                 Swal.fire({
                     title: '识别中...',
-                    html: '正在识别发票，请稍候（注意：需要配置百度OCR）',
+                    html: '正在识别发票，请稍候<br><small>PDF/OFD 直接解析，图片需已配置 OCR</small>',
                     allowOutsideClick: false,
                     didOpen: () => {
                         Swal.showLoading();
@@ -366,7 +363,7 @@ $(document).ready(function() {
                         }
                     },
                     error: function() {
-                        Swal.fire('错误', '识别失败，请检查百度OCR配置', 'error');
+                        Swal.fire('错误', '识别失败，请查看终端日志', 'error');
                     }
                 });
             }
@@ -380,8 +377,6 @@ $(document).ready(function() {
             text: '将删除所有邮件和发票记录，此操作不可恢复！',
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonColor: '#d33',
-            cancelButtonColor: '#3085d6',
             confirmButtonText: '确定清空',
             cancelButtonText: '取消'
         }).then((result) => {

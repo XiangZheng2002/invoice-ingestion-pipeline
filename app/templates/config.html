@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}配置 - 邮件发票识别系统{% endblock %}
+{% block title %}设置 - 邮件发票识别系统{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h2 class="mb-4">
-            <i class="fas fa-cog"></i> 系统配置
-        </h2>
+<div class="page-header">
+    <div>
+        <h1 class="page-title">设置</h1>
+        <p class="page-subtitle">邮箱授权与 OCR 密钥（电子发票识别不需要 OCR）</p>
     </div>
 </div>
 
@@ -15,8 +14,8 @@
     <!-- QQ邮箱配置 -->
     <div class="col-md-6">
         <div class="card mb-4">
-            <div class="card-header bg-primary text-white">
-                <h5 class="mb-0"><i class="fas fa-envelope"></i> QQ邮箱配置</h5>
+            <div class="card-header">
+                <span><i class="fas fa-envelope"></i>QQ 邮箱</span>
             </div>
             <div class="card-body">
                 <form id="emailConfigForm">
@@ -60,8 +59,8 @@
                     </div>
 
                     <div class="d-grid gap-2">
-                        <button type="button" class="btn btn-info" id="testConnectionBtn">
-                            <i class="fas fa-plug"></i> 测试连接
+                        <button type="button" class="btn btn-outline-secondary" id="testConnectionBtn">
+                            <i class="fas fa-plug"></i>测试连接
                         </button>
                         <button type="submit" class="btn btn-primary">
                             <i class="fas fa-save"></i> 保存配置
@@ -75,19 +74,21 @@
     <!-- 百度OCR配置 -->
     <div class="col-md-6">
         <div class="card mb-4">
-            <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="fas fa-brain"></i> 百度OCR配置</h5>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-brain"></i>百度 OCR</span>
+                <span class="badge bg-secondary">可选</span>
             </div>
             <div class="card-body">
                 <div class="alert alert-info">
                     <i class="fas fa-info-circle"></i>
-                    <strong>如何获取百度OCR密钥？</strong>
+                    <strong>只有识别图片和扫描件才需要配置。</strong>
+                    电子发票（PDF / OFD）直接读取文字层，不消耗 OCR 额度。
                     <hr>
                     <p class="mb-0 small">
-                        1. 访问 <a href="https://console.bce.baidu.com/ai/#/ai/ocr/overview/index" target="_blank">百度智能云OCR控制台</a><br>
+                        1. 访问 <a href="https://console.bce.baidu.com/ai/#/ai/ocr/overview/index" target="_blank">百度智能云 OCR 控制台</a><br>
                         2. 登录并创建应用<br>
                         3. 在应用列表中获取 APP_ID、API_KEY、SECRET_KEY<br>
-                        4. 填写到下方表单中
+                        4. 填写到下方表单
                     </p>
                 </div>
 
@@ -116,11 +117,11 @@
                     </div>
 
                     <div class="d-grid gap-2">
-                        <button type="button" class="btn btn-info" id="testOCRBtn">
-                            <i class="fas fa-vial"></i> 测试OCR配置
+                        <button type="button" class="btn btn-outline-secondary" id="testOCRBtn">
+                            <i class="fas fa-vial"></i>测试 OCR 配置
                         </button>
-                        <button type="submit" class="btn btn-success">
-                            <i class="fas fa-save"></i> 保存OCR配置
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i>保存 OCR 配置
                         </button>
                     </div>
                 </form>
@@ -129,18 +130,22 @@
 
         <!-- 使用说明 -->
         <div class="card">
-            <div class="card-header bg-warning">
-                <h5 class="mb-0"><i class="fas fa-question-circle"></i> 使用说明</h5>
+            <div class="card-header">
+                <span><i class="fas fa-question-circle"></i>使用说明</span>
             </div>
             <div class="card-body">
-                <ol class="mb-0">
-                    <li><strong>配置QQ邮箱和授权码</strong></li>
-                    <li><strong>设置日期权限范围</strong>（如：2024-01-01 到 2024-12-31）</li>
-                    <li>测试连接，确保配置正确</li>
-                    <li>保存配置</li>
-                    <li>前往"邮件列表"页面，<strong>选择具体日期范围获取邮件</strong>（必须在权限范围内）</li>
-                    <li>点击"识别发票"自动提取发票信息</li>
-                    <li>在"发票列表"查看和导出CSV数据</li>
+                <p class="mb-2"><strong>最快的方式（无需任何配置）</strong></p>
+                <ol class="small">
+                    <li>去<a href="/upload/">上传识别</a>，把发票文件拖进去</li>
+                    <li>在<a href="/invoice/list">发票</a>页查看结果并导出 CSV</li>
+                </ol>
+
+                <p class="mb-2 mt-3"><strong>从邮箱批量获取</strong></p>
+                <ol class="mb-0 small">
+                    <li>填写 QQ 邮箱和授权码（不是 QQ 密码）</li>
+                    <li>设置授权日期范围，测试连接后保存</li>
+                    <li>去<a href="/email/list">邮件</a>页选具体日期获取邮件</li>
+                    <li>点击"识别发票"自动提取信息</li>
                 </ol>
             </div>
         </div>

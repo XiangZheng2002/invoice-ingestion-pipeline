@@ -225,6 +225,20 @@ class Invoice:
         return invoice
 
     @staticmethod
+    def get_by_number(db_path, invoice_number):
+        """根据发票号码查找发票（用于去重）"""
+        if not invoice_number:
+            return None
+
+        conn = get_db_connection(db_path)
+        invoice = conn.execute(
+            'SELECT * FROM invoices WHERE invoice_number = ?',
+            (invoice_number,)
+        ).fetchone()
+        conn.close()
+        return invoice
+
+    @staticmethod
     def count(db_path):
         """统计发票数量"""
         conn = get_db_connection(db_path)

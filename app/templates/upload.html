@@ -1,0 +1,436 @@
+{% extends "base.html" %}
+
+{% block title %}上传识别 - 邮件发票识别系统{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 class="page-title">上传识别</h1>
+        <p class="page-subtitle">把发票或整个文件夹拖进来 · 电子发票无需 OCR</p>
+    </div>
+</div>
+
+<div class="alert {{ 'alert-info' if ocr_enabled else 'alert-warning' }}">
+    {% if ocr_enabled %}
+    <i class="fas fa-bolt"></i>
+    电子发票（PDF / OFD）直接读取文字层，离线免费且比 OCR 更准；图片和扫描件会自动调用已配置的百度 OCR。
+    {% else %}
+    <i class="fas fa-bolt"></i>
+    电子发票（PDF / OFD）直接读取文字层，<strong>无需任何配置</strong>即可识别。
+    图片和扫描件需要 OCR，当前未配置，可到 <a href="/config">设置</a> 填写百度 OCR 密钥。
+    {% endif %}
+</div>
+
+<div class="dropzone" id="dropzone">
+    <div class="dropzone-icon"><i class="fas fa-file-import"></i></div>
+    <div class="dropzone-title">把发票文件或文件夹拖到这里</div>
+    <div class="dropzone-desc">整个文件夹拖进来也可以，会自动递归查找里面的发票</div>
+
+    <div class="dropzone-actions">
+        <button type="button" class="btn btn-primary" id="pickFilesBtn">
+            <i class="fas fa-file-lines"></i>选择文件
+        </button>
+        <button type="button" class="btn btn-outline-secondary" id="pickFolderBtn">
+            <i class="fas fa-folder-open"></i>选择文件夹
+        </button>
+    </div>
+
+    <p class="dropzone-formats">PDF · OFD · JPG · PNG · BMP · WEBP · TIFF，单个文件最大 50MB</p>
+
+    <input type="file" id="fileInput" multiple class="d-none"
+           accept=".pdf,.ofd,.jpg,.jpeg,.png,.bmp,.webp,.tif,.tiff">
+    {# webkitdirectory 让浏览器弹出"选择文件夹"对话框，并递归给出目录下所有文件 #}
+    <input type="file" id="folderInput" multiple webkitdirectory directory class="d-none">
+</div>
+
+<div id="progressPanel" class="progress-panel" style="display: none;">
+    <div class="progress-head">
+        <span class="progress-text" id="progressText">准备中…</span>
+        <button type="button" class="btn btn-sm btn-outline-danger" id="cancelBtn">
+            <i class="fas fa-xmark"></i>停止
+        </button>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+</div>
+
+<div id="resultCard" class="card mt-4" style="display: none;">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>识别结果 <span class="text-muted fw-normal" id="resultSummary"></span></span>
+        <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-secondary" id="clearResults">
+                <i class="fas fa-eraser"></i>清空
+            </button>
+            <a href="/invoice/list" class="btn btn-sm btn-outline-secondary">全部发票</a>
+            <a href="/invoice/export" class="btn btn-sm btn-primary">
+                <i class="fas fa-download"></i>导出 CSV
+            </a>
+        </div>
+    </div>
+    <div class="card-body is-flush">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th style="width: 22%;">文件</th>
+                        <th style="width: 8%;">状态</th>
+                        <th>发票号码</th>
+                        <th>开票日期</th>
+                        <th>销售方</th>
+                        <th class="text-end">价税合计</th>
+                        <th>来源</th>
+                    </tr>
+                </thead>
+                <tbody id="resultBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(function () {
+    const ALLOWED_EXT = ['.pdf', '.ofd', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'];
+    const MAX_SIZE = 50 * 1024 * 1024;
+    const CONFIRM_THRESHOLD = 50;   // 超过这个数量先跟用户确认一次
+
+    const $dropzone = $('#dropzone');
+    const $fileInput = $('#fileInput');
+    const $folderInput = $('#folderInput');
+    const $resultBody = $('#resultBody');
+    const $resultCard = $('#resultCard');
+    const $progressPanel = $('#progressPanel');
+
+    let running = false;
+    let cancelRequested = false;
+
+    // ---------- 选择入口 ----------
+
+    $('#pickFilesBtn').on('click', function (e) {
+        e.stopPropagation();          // 别再冒泡触发 dropzone 的点击
+        $fileInput.trigger('click');
+    });
+
+    $('#pickFolderBtn').on('click', function (e) {
+        e.stopPropagation();
+        $folderInput.trigger('click');
+    });
+
+    // 点空白区域默认走"选择文件"
+    $dropzone.on('click', function () {
+        $fileInput.trigger('click');
+    });
+
+    $fileInput.add($folderInput).on('change', function () {
+        const picked = Array.from(this.files || []).map(function (file) {
+            // 选文件夹时 webkitRelativePath 形如 "发票/2026-08/xx.pdf"
+            return { file: file, path: file.webkitRelativePath || file.name };
+        });
+        $(this).val('');              // 允许重复选同一批
+        if (picked.length) {
+            handleItems(picked);
+        }
+    });
+
+    // ---------- 拖拽 ----------
+
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function (eventName) {
+        $dropzone.on(eventName, function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+        $(document).on(eventName, function (e) {
+            e.preventDefault();       // 阻止浏览器直接打开文件
+        });
+    });
+
+    $dropzone.on('dragenter dragover', function () {
+        $dropzone.addClass('is-dragover');
+    });
+
+    $dropzone.on('dragleave drop', function () {
+        $dropzone.removeClass('is-dragover');
+    });
+
+    $dropzone.on('drop', function (e) {
+        const dt = e.originalEvent.dataTransfer;
+
+        // webkitGetAsEntry 必须在事件处理函数里同步调用，
+        // 一旦 await 过，DataTransferItemList 就失效了
+        let entries = [];
+        if (dt.items && dt.items.length && dt.items[0].webkitGetAsEntry) {
+            entries = Array.from(dt.items)
+                .map(function (item) { return item.webkitGetAsEntry(); })
+                .filter(Boolean);
+        }
+
+        if (entries.length) {
+            collectEntries(entries).then(function (items) {
+                if (items.length) handleItems(items);
+            });
+        } else {
+            // 老浏览器兜底：只能拿到文件，拿不到文件夹
+            const items = Array.from(dt.files || []).map(function (file) {
+                return { file: file, path: file.name };
+            });
+            if (items.length) handleItems(items);
+        }
+    });
+
+    // 递归展开拖入的目录
+    async function collectEntries(entries) {
+        const out = [];
+        for (const entry of entries) {
+            await walkEntry(entry, out, '', 0);
+        }
+        return out;
+    }
+
+    function walkEntry(entry, out, prefix, depth) {
+        return new Promise(function (resolve) {
+            if (entry.isFile) {
+                entry.file(function (file) {
+                    out.push({ file: file, path: prefix + file.name });
+                    resolve();
+                }, function () { resolve(); });
+                return;
+            }
+
+            if (!entry.isDirectory || depth > 8) {   // 防止软链接套娃
+                resolve();
+                return;
+            }
+
+            const reader = entry.createReader();
+            const dirPrefix = prefix + entry.name + '/';
+
+            // readEntries 每次最多返回 100 条，必须反复读到空为止
+            const readBatch = function () {
+                reader.readEntries(async function (batch) {
+                    if (!batch.length) {
+                        resolve();
+                        return;
+                    }
+                    for (const child of batch) {
+                        await walkEntry(child, out, dirPrefix, depth + 1);
+                    }
+                    readBatch();
+                }, function () { resolve(); });
+            };
+            readBatch();
+        });
+    }
+
+    // ---------- 处理 ----------
+
+    async function handleItems(items) {
+        if (running) {
+            Swal.fire('请稍候', '还有一批文件正在识别中', 'info');
+            return;
+        }
+
+        const total = items.length;
+        const accepted = [];
+        let skippedType = 0;
+        let skippedSize = 0;
+
+        items.forEach(function (item) {
+            const name = item.file.name;
+            if (name.startsWith('.')) { skippedType++; return; }   // .DS_Store 之类
+
+            const dot = name.lastIndexOf('.');
+            const ext = dot === -1 ? '' : name.slice(dot).toLowerCase();
+
+            if (ALLOWED_EXT.indexOf(ext) === -1) { skippedType++; return; }
+            if (item.file.size > MAX_SIZE) { skippedSize++; return; }
+
+            accepted.push(item);
+        });
+
+        if (!accepted.length) {
+            Swal.fire({
+                icon: 'info',
+                title: '没有可识别的文件',
+                html: `共扫描 ${total} 个文件，其中没有支持的发票格式<br>` +
+                      `<small>支持 PDF、OFD、JPG、PNG、BMP、WEBP、TIFF</small>`
+            });
+            return;
+        }
+
+        // 文件夹里文件多的时候，先确认一下再开始
+        if (accepted.length >= CONFIRM_THRESHOLD) {
+            const confirmed = await Swal.fire({
+                icon: 'question',
+                title: '确认开始识别',
+                html: `扫描到 <strong>${accepted.length}</strong> 个可识别文件` +
+                      (total > accepted.length ? `（已跳过 ${total - accepted.length} 个）` : '') +
+                      '<br><small>数量较多，过程中可以随时停止</small>',
+                showCancelButton: true,
+                confirmButtonText: '开始识别',
+                cancelButtonText: '取消'
+            });
+            if (!confirmed.isConfirmed) return;
+        }
+
+        running = true;
+        cancelRequested = false;
+        $resultCard.show();
+        showProgress(0, accepted.length);
+
+        let saved = 0, duplicates = 0, failed = 0, done = 0;
+
+        for (const item of accepted) {
+            if (cancelRequested) break;
+
+            const $row = appendPendingRow(item.path);
+
+            try {
+                const response = await uploadOne(item.file);
+                const result = (response.results && response.results[0]) || {
+                    success: false,
+                    message: response.message || '未知错误'
+                };
+
+                renderRow($row, item.path, result);
+
+                if (!result.success) {
+                    failed++;
+                } else if (result.duplicate) {
+                    duplicates++;
+                } else {
+                    saved++;
+                }
+            } catch (err) {
+                renderRow($row, item.path, { success: false, message: '上传失败：' + err });
+                failed++;
+            }
+
+            done++;
+            showProgress(done, accepted.length);
+        }
+
+        running = false;
+        hideProgress();
+
+        const stopped = cancelRequested && done < accepted.length;
+        const parts = [`成功识别 ${saved} 张发票`];
+        if (duplicates) parts.push(`${duplicates} 张重复跳过`);
+        if (failed) parts.push(`${failed} 个文件失败`);
+        if (skippedType) parts.push(`${skippedType} 个非发票文件已忽略`);
+        if (skippedSize) parts.push(`${skippedSize} 个文件超过 50MB`);
+        if (stopped) parts.push(`已手动停止，剩余 ${accepted.length - done} 个未处理`);
+
+        const summary = parts.join('，');
+        $('#resultSummary').text('· ' + summary);
+
+        Swal.fire({
+            icon: stopped ? 'info' : (failed && !saved ? 'error' : (failed ? 'warning' : 'success')),
+            title: stopped ? '已停止' : '处理完成',
+            text: summary,
+            confirmButtonText: '知道了'
+        });
+    }
+
+    function uploadOne(file) {
+        const formData = new FormData();
+        formData.append('files', file);
+
+        return $.ajax({
+            url: '/upload/api',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false
+        });
+    }
+
+    // ---------- 进度 ----------
+
+    $('#cancelBtn').on('click', function () {
+        cancelRequested = true;
+        $(this).prop('disabled', true).text('停止中…');
+    });
+
+    function showProgress(done, total) {
+        $progressPanel.show();
+        $('#cancelBtn').prop('disabled', false).html('<i class="fas fa-xmark"></i>停止');
+        $('#progressText').text(`正在识别 ${done} / ${total}`);
+        $('#progressFill').css('width', (total ? (done / total) * 100 : 0) + '%');
+    }
+
+    function hideProgress() {
+        $progressPanel.hide();
+        $('#progressFill').css('width', '0%');
+    }
+
+    // ---------- 结果表格 ----------
+
+    $('#clearResults').on('click', function () {
+        $resultBody.empty();
+        $('#resultSummary').text('');
+        $resultCard.hide();
+    });
+
+    function appendPendingRow(path) {
+        const $row = $(`
+            <tr>
+                <td class="text-break">${renderPath(path)}</td>
+                <td><span class="badge bg-secondary">
+                    <i class="fas fa-spinner fa-spin"></i> 识别中
+                </span></td>
+                <td colspan="5" class="text-muted">处理中…</td>
+            </tr>
+        `);
+        $resultBody.prepend($row);
+        return $row;
+    }
+
+    function renderRow($row, path, result) {
+        if (!result.success) {
+            $row.html(`
+                <td class="text-break">${renderPath(path)}</td>
+                <td><span class="badge bg-danger">失败</span></td>
+                <td colspan="5" class="text-muted small">${escapeHtml(result.message || '')}</td>
+            `);
+            return;
+        }
+
+        const inv = result.invoice || {};
+        const badge = result.duplicate
+            ? '<span class="badge bg-warning">重复</span>'
+            : '<span class="badge bg-success">成功</span>';
+
+        $row.html(`
+            <td class="text-break">${renderPath(path)}</td>
+            <td>${badge}</td>
+            <td class="nowrap">${escapeHtml(inv.invoice_number || '-')}</td>
+            <td class="nowrap">${escapeHtml(inv.invoice_date || '-')}</td>
+            <td class="text-break">${escapeHtml(inv.seller_name || '-')}</td>
+            <td class="text-end amount">¥${formatAmount(inv.total_with_tax)}</td>
+            <td><span class="source-tag">${escapeHtml(result.source || '-')}</span></td>
+        `);
+    }
+
+    // 文件夹导入时把所在目录显示成灰色前缀，文件名本身更醒目
+    function renderPath(path) {
+        const idx = path.lastIndexOf('/');
+        if (idx === -1) {
+            return escapeHtml(path);
+        }
+        return `<span class="path-prefix">${escapeHtml(path.slice(0, idx + 1))}</span>` +
+               escapeHtml(path.slice(idx + 1));
+    }
+
+    function formatAmount(value) {
+        return Number(value || 0).toLocaleString('zh-CN', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    function escapeHtml(text) {
+        return $('<div>').text(text == null ? '' : text).html();
+    }
+});
+</script>
+{% endblock %}

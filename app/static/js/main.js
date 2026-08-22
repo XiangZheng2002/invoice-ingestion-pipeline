@@ -33,6 +33,40 @@ function formatDate(dateString) {
     return date.toLocaleDateString('zh-CN');
 }
 
+// DataTables 中文语言包
+// 内联在这里而不是从 cdn.datatables.net 加载 i18n/zh.json，
+// 否则断网时表格控件会全是英文
+const DT_LANG_ZH = {
+    processing: '处理中...',
+    lengthMenu: '每页 _MENU_ 条',
+    zeroRecords: '没有匹配的记录',
+    info: '第 _START_ - _END_ 条 / 共 _TOTAL_ 条',
+    infoEmpty: '暂无记录',
+    infoFiltered: '（从 _MAX_ 条中筛选）',
+    search: '搜索：',
+    emptyTable: '暂无数据',
+    loadingRecords: '载入中...',
+    paginate: {
+        first: '首页',
+        previous: '上一页',
+        next: '下一页',
+        last: '末页'
+    },
+    aria: {
+        sortAscending: '：升序排列',
+        sortDescending: '：降序排列'
+    }
+};
+
+// 表格统一配置
+function initDataTable(selector, options) {
+    return $(selector).DataTable(Object.assign({
+        language: DT_LANG_ZH,
+        pageLength: 25,
+        lengthMenu: [10, 25, 50, 100]
+    }, options || {}));
+}
+
 // 显示加载提示
 function showLoading(message = '处理中...') {
     Swal.fire({
@@ -74,14 +108,7 @@ function showConfirm(title, text, callback) {
 
 // 页面加载完成后执行
 $(document).ready(function() {
-    // 激活当前导航项
-    const currentPath = window.location.pathname;
-    $('.navbar-nav .nav-link').each(function() {
-        const href = $(this).attr('href');
-        if (currentPath === href || (href !== '/' && currentPath.startsWith(href))) {
-            $(this).addClass('active');
-        }
-    });
+    // 导航高亮由模板在服务端渲染（base.html），这里不再重复处理
 
     // 初始化所有提示框
     const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
